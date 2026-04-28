@@ -5,16 +5,18 @@ const { z } = require("zod");
 const app = express();
 app.use(express.json());
 
-// --- In-memory storage (pentru idempotency)
+// In-memory storage
 const jobsByKey = new Map();
 
-// --- Logging middleware (bonus)
+const existingNamespaces = new Set(["legea_31_1990"]);
+
+// Logging middleware
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
   next();
 });
 
-// --- Schema validare ---
+// Validation schema
 const QuerySchema = z.object({
   question: z.string().min(1).max(2000),
   language: z.literal("ro"),
@@ -23,7 +25,7 @@ const QuerySchema = z.object({
   include_answer: z.boolean().optional()
 });
 
-// --- Middleware headers ---
+// Middleware headers
 app.use((req, res, next) => {
   if (req.path === "/v1/health") return next();
 
@@ -51,7 +53,7 @@ app.use((req, res, next) => {
 
   req.requestId = requestId;
 
-  // headers PRO
+  // headers
   res.set("X-Request-ID", requestId);
   res.set("X-Vendor-Trace-ID", "trace_" + uuidv4());
   res.set("Server-Timing", "retrieval;dur=50, generation;dur=120");
@@ -59,8 +61,9 @@ app.use((req, res, next) => {
   next();
 });
 
-// --- 1) QUERY ---
+// QUERY
 app.post("/v1/query", (req, res) => {
+  // BODY VALIDATION
   const parsed = QuerySchema.safeParse(req.body);
 
   if (!parsed.success) {
@@ -76,37 +79,71 @@ app.post("/v1/query", (req, res) => {
 
   const { question, namespaces, include_answer = true } = req.body;
 
-  // NO RESULT CASE (important)
-  if (question.toLowerCase().includes("programul primariei")) {
+  // NAMESPACE CHECK
+  const validNamespaces = namespaces.filter(ns => existingNamespaces.has(ns));
+
+  if (validNamespaces.length === 0) {
+    return res.status(404).json({
+      error: {
+        code: "namespace_not_found",
+        message: "No indexed content for provided namespace",
+        request_id: req.requestId
+      }
+    });
+  }
+
+  //NO RESULT CASE
+  const lowerQuestion = question.toLowerCase();
+
+  if (
+    lowerQuestion.includes("programul primariei") ||
+    lowerQuestion.includes("orar") ||
+    lowerQuestion.includes("program")
+  ) {
     return res.json({
       request_id: req.requestId,
       answer: null,
       citations: [],
-      usage: { input_tokens: 10, output_tokens: 0, cost_usd: 0, model_id: "mock" },
-      latency_ms: 100,
+      usage: {
+        input_tokens: 20,
+        output_tokens: 0,
+        cost_usd: 0,
+        model_id: "mock-model"
+      },
+      latency_ms: 120,
       model_version: "mock-1.0",
       confidence: 0.0
     });
   }
 
-  // MULTI-NAMESPACE (bonus)
-  const citations = namespaces.map((ns, i) => ({
+  // CITATIONS 
+  const citations = validNamespaces.map((ns, i) => ({
     marker: `[${i + 1}]`,
     chunk: {
       chunk_id: uuidv4(),
-      content: `Conținut relevant din ${ns}...`,
+      content: `Conținut relevant extras din ${ns}, articolul 15...`,
       article_number: "15",
       source_id: "s_" + (i + 1),
+      source_url: "https://legislatie.just.ro/",
+      source_title: "Document legislativ",
       namespace_id: ns,
       score: 0.9 - i * 0.1
     }
   }));
 
+  const hasArticleHint = lowerQuestion.includes("15");
+
+  const answerText = hasArticleHint
+    ? "Articolul 15 din Legea 31/1990 prevede că aporturile în numerar sunt obligatorii [1]."
+    : "Conform legislației relevante, informațiile solicitate sunt detaliate în cadrul documentelor disponibile [1].";
+
+  // METRICS REALISTE
+  const latency = Math.floor(Math.random() * 300) + 200;
+  const confidence = validNamespaces.length > 1 ? 0.85 : 0.92;
+
   return res.json({
     request_id: req.requestId,
-    answer: include_answer
-      ? "Articolul 15 din Legea 31/1990 prevede că aporturile în numerar sunt obligatorii [1]."
-      : null,
+    answer: include_answer ? answerText : null,
     citations,
     usage: {
       input_tokens: 100,
@@ -114,13 +151,13 @@ app.post("/v1/query", (req, res) => {
       cost_usd: 0.001,
       model_id: "mock-model"
     },
-    latency_ms: 400,
+    latency_ms: latency,
     model_version: "mock-1.0",
-    confidence: 0.9
+    confidence
   });
 });
 
-// --- 2) INGEST ---
+// INGEST
 app.post("/v1/ingest", (req, res) => {
   const key = req.headers["idempotency-key"];
 
@@ -130,7 +167,6 @@ app.post("/v1/ingest", (req, res) => {
     });
   }
 
-  // dacă există deja → returnezi același job
   if (jobsByKey.has(key)) {
     return res.status(202).json(jobsByKey.get(key));
   }
@@ -147,7 +183,7 @@ app.post("/v1/ingest", (req, res) => {
   return res.status(202).json(job);
 });
 
-// --- 3) INGEST STATUS ---
+// INGEST STATUS
 app.get("/v1/ingest/:job_id", (req, res) => {
   return res.json({
     job_id: req.params.job_id,
@@ -165,7 +201,7 @@ app.get("/v1/ingest/:job_id", (req, res) => {
   });
 });
 
-// --- 4) DELETE namespace (bonus)
+// DELETE namespace
 app.delete("/v1/namespaces/:namespace_id", (req, res) => {
   return res.status(202).json({
     job_id: "del_" + uuidv4(),
@@ -174,7 +210,37 @@ app.delete("/v1/namespaces/:namespace_id", (req, res) => {
   });
 });
 
-// --- 5) HEALTH ---
+app.delete("/v1/namespaces/:namespace_id/sources/:source_id", (req, res) => {
+  return res.status(204).send();
+});
+
+app.get("/v1/namespaces/:namespace_id/stats", (req, res) => {
+  res.json({
+    namespace_id: req.params.namespace_id,
+    chunk_count: 120,
+    source_count: 3,
+    total_tokens_indexed: 15000,
+    last_ingested_at: new Date().toISOString(),
+    embedding_model: "mock-embedding",
+    embedding_dim: 1536
+  });
+});
+
+app.get("/v1/openapi.json", (req, res) => {
+  res.json({
+    openapi: "3.0.0",
+    info: {
+      title: "RAG API Mock",
+      version: "1.0.0"
+    },
+    paths: {
+      "/v1/query": { post: {} },
+      "/v1/ingest": { post: {} }
+    }
+  });
+});
+
+// HEALTH
 app.get("/v1/health", (req, res) => {
   res.json({
     status: "ok",
@@ -188,7 +254,7 @@ app.get("/v1/health", (req, res) => {
   });
 });
 
-// --- Global error handler (pro)
+// Global error handler
 app.use((err, req, res, next) => {
   console.error(err);
   res.status(500).json({
