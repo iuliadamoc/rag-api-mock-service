@@ -22,7 +22,7 @@ const metrics = {
   vendor_cost_usd_total: 0,
   vendor_tokens_input: 0,
   vendor_tokens_output: 0,
-  vendor_external_api_errors_total: 0
+  vendor_external_api_errors_total: {}
 };
 
 // Logging middleware
@@ -876,7 +876,11 @@ app.get("/v1/health", (req, res) => {
 // Global error handler
 app.use((err, req, res, next) => {
   console.error(err);
-  metrics.vendor_external_api_errors_total += 1;
+  const key = `llm_timeout`; // exemple
+
+  metrics.vendor_external_api_errors_total[key] =
+    (metrics.vendor_external_api_errors_total[key] || 0) + 1;
+
   res.status(500).json({
     error: {
       code: "internal_error",
@@ -909,7 +913,11 @@ app.get("/metrics", (req, res) => {
   output += `vendor_cost_usd_total ${metrics.vendor_cost_usd_total}\n`;
 
   // External API errors
-  output += `vendor_external_api_errors_total ${metrics.vendor_external_api_errors_total}\n`;
+  for (const key in metrics.vendor_external_api_errors_total) {
+    const [dependency, error_type] = key.split("_");
+
+    output += `vendor_external_api_errors_total{dependency="${dependency}",error_type="${error_type}"} ${metrics.vendor_external_api_errors_total[key]}\n`;
+  }
 
   res.set("Content-Type", "text/plain");
   res.send(output);
