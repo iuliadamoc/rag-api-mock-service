@@ -117,17 +117,31 @@ app.post("/v1/query", (req, res) => {
     });
   }
 
-  // CITATIONS 
-  const citations = validNamespaces.map((ns, i) => ({
+  // get data from ingest
+  const data = validNamespaces.flatMap(ns => namespaceData.get(ns) || []);
+
+  // no data → no result (spec)
+  if (data.length === 0) {
+    return res.json({
+      request_id: req.requestId,
+      answer: null,
+      citations: [],
+      usage: { input_tokens: 10, output_tokens: 0, cost_usd: 0, model_id: "mock" },
+      latency_ms: 120,
+      model_version: "mock-1.0",
+      confidence: 0.0
+    });
+  }
+
+  // build citations from real data
+  const citations = data.slice(0, 3).map((item, i) => ({
     marker: `[${i + 1}]`,
     chunk: {
       chunk_id: uuidv4(),
-      content: `Conținut relevant extras din ${ns}, articolul 15...`,
-      article_number: "15",
-      source_id: "s_" + (i + 1),
-      source_url: "https://legislatie.just.ro/",
-      source_title: "Document legislativ",
-      namespace_id: ns,
+      content: item.content,
+      article_number: item.article_number,
+      source_id: item.source_id,
+      namespace_id: validNamespaces[0],
       score: 0.9 - i * 0.1
     }
   }));
@@ -247,18 +261,50 @@ app.post("/v1/ingest", (req, res) => {
 
 // INGEST STATUS
 app.get("/v1/ingest/:job_id", (req, res) => {
+  const jobId = req.params.job_id;
+
+  // find job by id (search in jobsByKey)
+  const job = [...jobsByKey.values()].find(j => j.job_id === jobId);
+
+  if (!job) {
+    return res.status(404).json({
+      error: {
+        code: "not_found",
+        message: "Job not found",
+        request_id: req.requestId
+      }
+    });
+  }
+
+  // simulate progress stages
+  const stageMap = {
+    queued: { stage: "queued", percent: 10 },
+    fetching: { stage: "fetching", percent: 30 },
+    chunking: { stage: "chunking", percent: 50 },
+    embedding: { stage: "embedding", percent: 70 },
+    indexing: { stage: "indexing", percent: 90 },
+    done: { stage: "done", percent: 100 }
+  };
+
+  const progress = stageMap[job.status] || { stage: "queued", percent: 0 };
+
+  // add retry-after if not done
+  if (job.status !== "done") {
+    res.set("Retry-After", "5");
+  }
+
   return res.json({
-    job_id: req.params.job_id,
-    namespace_id: "legea_31_1990",
-    source_id: "s_1",
-    status: "done",
+    job_id: job.job_id,
+    namespace_id: job.namespace_id,
+    source_id: job.source_id,
+    status: job.status,
     progress: {
-      stage: "indexing",
-      percent: 100,
-      chunks_created: 10
+      stage: progress.stage,
+      percent: progress.percent,
+      chunks_created: progress.percent > 50 ? 10 : 0
     },
-    submitted_at: new Date(Date.now() - 60000).toISOString(),
-    completed_at: new Date().toISOString(),
+    submitted_at: job.submitted_at,
+    completed_at: job.completed_at || null,
     error: null
   });
 });
