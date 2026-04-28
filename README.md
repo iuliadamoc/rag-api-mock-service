@@ -1,51 +1,70 @@
 # RAG API Mock Service
 
-This project is a mock implementation of a Retrieval-Augmented Generation (RAG) API based on an OpenAPI specification.
+This project is a mock implementation of a Retrieval-Augmented Generation (RAG) API based on a given external specification.
 
-The goal of this project is to demonstrate the ability to interpret and implement a complex API contract, focusing on correctness, structure, and compliance rather than full AI functionality.
+The goal was to build a backend that respects the contract and behaves like a real service, even if the AI part is simulated.
 
----
+## Features
 
-## 🚀 Features
+- Implemented endpoints:
+  - POST /v1/query
+  - POST /v1/ingest
+  - GET /v1/ingest/:job_id
+  - GET /v1/namespaces/:id/stats
+  - POST /v1/eval
+  - GET /v1/health
+  - GET /metrics
+  - GET /v1/openapi.json
 
-- Implements core endpoints:
-  - `POST /v1/query`
-  - `POST /v1/ingest`
-  - `GET /v1/ingest/:job_id`
-  - `GET /v1/health`
-  - `GET /v1/namespaces/:id/stats` (bonus)
-- Request validation using **Zod**
-- Header validation (Authorization, Tenant, Request ID)
-- Idempotent ingest endpoint
+- Request validation using Zod
+- Header validation (Authorization, X-Request-ID, X-Tenant-ID)
+- Basic API key authentication
+- Tenant validation (403 for invalid tenant)
+- Idempotent ingest endpoint (Idempotency-Key support)
+- Multipart file upload support
+- Stable UUID generation for chunks
 - Multi-namespace query simulation
-- Proper error handling based on spec
+- Article hint support (hint_article_number)
+- Proper error handling (including 502, 503, 504)
 - "No result" handling (no hallucinations)
 
----
+## Observability
 
-## 🧠 Design Decisions
+The service exposes Prometheus-style metrics at /metrics.
 
-This is a **mock implementation**, meaning:
+Metrics include:
+- http_requests_total (with method, endpoint, status)
+- request duration
+- token usage (simulated)
+- cost (simulated)
+- external error counters
 
+Each request also includes:
+- X-Request-ID
+- X-Vendor-Trace-ID
+- Server-Timing header
+
+## Design Notes
+
+This is a mock service:
 - No real embeddings or vector database
 - No real LLM integration
-- Focus is on:
-  - API contract compliance
-  - Response structure correctness
-  - Edge case handling
+- Retrieval and ranking are simulated
 
----
+The focus was on:
+- following the API spec as closely as possible
+- handling edge cases correctly
+- keeping the structure similar to a real production service
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 - Node.js
-- Express.js
-- Zod (validation)
-- UUID
+- Express
+- Zod
+- Multer (file upload)
+- crypto (for stable IDs)
 
----
-
-## ▶️ How to Run
+## How to run
 
 ```bash
 npm install
