@@ -9,6 +9,7 @@ app.use(express.json());
 const jobsByKey = new Map();
 
 const existingNamespaces = new Set(["legea_31_1990"]);
+const namespaceData = new Map();
 
 // Logging middleware
 app.use((req, res, next) => {
@@ -161,24 +162,85 @@ app.post("/v1/query", (req, res) => {
 app.post("/v1/ingest", (req, res) => {
   const key = req.headers["idempotency-key"];
 
+  // validate idempotency key
   if (!key) {
     return res.status(400).json({
-      error: { code: "invalid_request", message: "Missing Idempotency-Key", request_id: req.requestId }
+      error: {
+        code: "invalid_request",
+        message: "Missing Idempotency-Key",
+        request_id: req.requestId
+      }
     });
   }
 
+  // return existing job if same key
   if (jobsByKey.has(key)) {
     return res.status(202).json(jobsByKey.get(key));
   }
 
+  const { namespace_id, source_id } = req.body;
+
+  // validate minimal required fields
+  if (!namespace_id || !source_id) {
+    return res.status(422).json({
+      error: {
+        code: "validation_error",
+        message: "Missing required fields",
+        request_id: req.requestId
+      }
+    });
+  }
+
+  // ensure namespace exists in mock storage
+  existingNamespaces.add(namespace_id);
+
+  // init namespace data if not exists
+  if (!namespaceData.has(namespace_id)) {
+    namespaceData.set(namespace_id, []);
+  }
+
+  // create ingestion job
+  const jobId = "j_" + uuidv4();
+
   const job = {
-    job_id: "j_" + uuidv4(),
+    job_id: jobId,
+    namespace_id,
+    source_id,
     status: "queued",
     submitted_at: new Date().toISOString(),
-    estimated_completion_at: new Date(Date.now() + 5 * 60 * 1000).toISOString()
+    estimated_completion_at: new Date(Date.now() + 5000).toISOString()
   };
 
   jobsByKey.set(key, job);
+
+  // simulate async ingestion pipeline
+  setTimeout(() => {
+    job.status = "fetching";
+  }, 1000);
+
+  setTimeout(() => {
+    job.status = "chunking";
+  }, 2000);
+
+  setTimeout(() => {
+    job.status = "embedding";
+  }, 3000);
+
+  setTimeout(() => {
+    job.status = "indexing";
+
+    // simulate adding indexed content
+    namespaceData.get(namespace_id).push({
+      content: "Articolul 15. — Aporturile în numerar sunt obligatorii.",
+      article_number: "15",
+      source_id
+    });
+  }, 4000);
+
+  setTimeout(() => {
+    job.status = "done";
+    job.completed_at = new Date().toISOString();
+  }, 5000);
 
   return res.status(202).json(job);
 });
