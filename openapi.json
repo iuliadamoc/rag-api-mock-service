@@ -1,0 +1,100 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "RAG Service API",
+    "version": "1.0.0",
+    "description": "Mock RAG API implementation"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080"
+    }
+  ],
+  "paths": {
+    "/v1/query": {
+      "post": {
+        "summary": "Answer a question",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "question": { "type": "string" },
+                  "language": { "type": "string" },
+                  "namespaces": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  }
+                },
+                "required": ["question", "language", "namespaces"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/v1/ingest": {
+      "post": {
+        "summary": "Ingest document",
+        "responses": {
+          "202": {
+            "description": "Accepted"
+          }
+        }
+      }
+    },
+    "/v1/ingest/{job_id}": {
+      "get": {
+        "summary": "Get ingest status",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Status"
+          }
+        }
+      }
+    },
+    "/v1/namespaces/{namespace_id}": {
+      "delete": {
+        "summary": "Delete namespace",
+        "parameters": [
+          {
+            "name": "namespace_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Deletion started"
+          }
+        }
+      }
+    },
+    "/v1/health": {
+      "get": {
+        "summary": "Health check",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    }
+  }
+}

@@ -4,6 +4,7 @@ const { z } = require("zod");
 
 const app = express();
 app.use(express.json());
+const fs = require("fs");
 
 // In-memory storage
 const jobsByKey = new Map();
@@ -706,17 +707,9 @@ app.get("/v1/namespaces/:namespace_id/stats", (req, res) => {
 });
 
 app.get("/v1/openapi.json", (req, res) => {
-  res.json({
-    openapi: "3.0.0",
-    info: {
-      title: "RAG API Mock",
-      version: "1.0.0"
-    },
-    paths: {
-      "/v1/query": { post: {} },
-      "/v1/ingest": { post: {} }
-    }
-  });
+  const spec = fs.readFileSync("./openapi.json", "utf-8");
+  res.set("Content-Type", "application/json");
+  res.send(spec);
 });
 
 // HEALTH
