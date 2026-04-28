@@ -655,7 +655,9 @@ app.post("/v1/ingest", upload.single("file"), (req, res) => {
     },
 
     source_url: body.url || null,
-    source_title: body.metadata?.source_title || null
+    source_title: body.metadata?.source_title || null,
+
+    ingested_at: new Date().toISOString()
   });
 
   return res.status(202).json(job);
@@ -817,8 +819,13 @@ app.get("/v1/namespaces/:namespace_id/stats", (req, res) => {
   const sourceCount = sourceSet.size;
 
   // realistic last ingest
-  const lastIngestedAt = chunkCount > 0
-    ? new Date().toISOString()
+  const lastIngestedAt = data.length > 0
+    ? data.reduce((latest, item) => {
+        if (!item.ingested_at) return latest;
+        return (!latest || item.ingested_at > latest)
+          ? item.ingested_at
+          : latest;
+      }, null)
     : null;
 
   // simulate embedding model variation
@@ -829,7 +836,7 @@ app.get("/v1/namespaces/:namespace_id/stats", (req, res) => {
     namespace_id: namespaceId,
     chunk_count: chunkCount,
     source_count: sourceCount,
-    total_tokens_indexed: totalTokens,
+    total_tokens_indexed: Math.floor(totalTokens),
     last_ingested_at: lastIngestedAt,
     embedding_model: embeddingModel,
     embedding_dim: embeddingDim
