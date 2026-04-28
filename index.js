@@ -1,6 +1,7 @@
 const express = require("express");
 const { v4: uuidv4 } = require("uuid");
 const { z } = require("zod");
+const crypto = require("crypto");
 
 const app = express();
 app.use(express.json());
@@ -294,7 +295,7 @@ app.post("/v1/query", (req, res) => {
   const citations = finalData.slice(0, 3).map((item, i) => ({
     marker: `[${i + 1}]`,
     chunk: {
-      chunk_id: item.chunk_id || uuidv4(),
+      chunk_id: item.chunk_id, 
       content: item.content,
       article_number: item.article_number,
 
@@ -412,7 +413,7 @@ app.post("/v1/eval", (req, res) => {
   const citations = data.slice(0, 3).map((item, i) => ({
     marker: `[${i + 1}]`,
     chunk: {
-      chunk_id: item.chunk_id || uuidv4(),
+      chunk_id: item.chunk_id,
       content: item.content,
       article_number: item.article_number,
       source_id: item.source_id,
@@ -556,17 +557,31 @@ app.post("/v1/ingest", (req, res) => {
     namespaceData.set(body.namespace_id, []);
   }
 
+  const content = "Articolul 15. — Aporturile în numerar sunt obligatorii.";
+
+  const chunkId = crypto
+    .createHash("sha256")
+    .update(content + body.source_id)
+    .digest("hex")
+    .slice(0, 32);
+
   namespaceData.get(body.namespace_id).push({
-    content: "Articolul 15. — Aporturile în numerar sunt obligatorii.",
+    chunk_id: chunkId,  
+
+    content: content,
     article_number: "15",
+
     source_id: body.source_id,
     namespace_id: body.namespace_id,
+
     section_title: "Capitolul II",
     point_number: "a",
     page_number: 7,
+
     metadata: {
       document_type: "lege"
     },
+
     source_url: body.url || null,
     source_title: body.metadata?.source_title || null
   });
