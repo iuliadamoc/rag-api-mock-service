@@ -52,14 +52,30 @@
       "post": {
         "summary": "Ingest document",
         "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IngestRequest"
-              }
+            "required": true,
+            "content": {
+                "application/json": {
+                "schema": {
+                    "$ref": "#/components/schemas/IngestRequest"
+                }
+                },
+                "multipart/form-data": {
+                "schema": {
+                    "type": "object",
+                    "required": ["payload", "file"],
+                    "properties": {
+                    "payload": {
+                        "type": "string",
+                        "description": "JSON string of IngestRequest"
+                    },
+                    "file": {
+                        "type": "string",
+                        "format": "binary"
+                    }
+                    }
+                }
+                }
             }
-          }
         },
         "responses": {
           "202": {

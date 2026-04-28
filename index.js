@@ -11,6 +11,8 @@ const fs = require("fs");
 const multer = require("multer");
 const upload = multer({ limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB
 
+const VALID_KEYS = ["test_key"];
+
 // In-memory storage
 const jobsByKey = new Map();
 const rateLimitStore = new Map();
@@ -41,6 +43,17 @@ const QuerySchema = z.object({
   include_answer: z.boolean().optional()
 });
 
+function sendError(res, req, status, code, message, details = null) {
+  return res.status(status).json({
+    error: {
+      code,
+      message,
+      request_id: req.requestId,
+      details
+    }
+  });
+}
+
 // Middleware headers
 app.use((req, res, next) => {
   if (req.path === "/v1/health") return next();
@@ -52,6 +65,14 @@ app.use((req, res, next) => {
   if (!auth || !auth.startsWith("Bearer ")) {
     return res.status(401).json({
       error: { code: "unauthorized", message: "Missing/invalid Authorization", request_id: requestId || null }
+    });
+  }
+
+  const token = auth.split(" ")[1];
+
+  if (!VALID_KEYS.includes(token)) {
+    return res.status(401).json({
+      error: { code: "unauthorized", message: "Invalid API key", request_id: requestId || null }
     });
   }
 
@@ -140,6 +161,22 @@ app.use((req, res, next) => {
   next();
 });
 
+function stableUuidFromContent(content, sourceId) {
+  const hash = crypto
+    .createHash("sha256")
+    .update(content + sourceId)
+    .digest("hex");
+
+  // convert to UUID format: 8-4-4-4-12
+  return [
+    hash.slice(0, 8),
+    hash.slice(8, 12),
+    hash.slice(12, 16),
+    hash.slice(16, 20),
+    hash.slice(20, 32)
+  ].join("-");
+}
+
 // QUERY
 app.post("/v1/query", (req, res) => {
   const start = Date.now();
@@ -193,6 +230,29 @@ app.post("/v1/query", (req, res) => {
         request_id: req.requestId
       }
     });
+  }
+
+  const q = question.toLowerCase();
+
+  if (q.includes("upstream")) {
+    metrics.vendor_external_api_errors_total["llm_upstream"] =
+      (metrics.vendor_external_api_errors_total["llm_upstream"] || 0) + 1;
+
+    return sendError(res, req, 502, "upstream_error", "LLM service unreachable");
+  }
+
+  if (q.includes("unavailable")) {
+    metrics.vendor_external_api_errors_total["service_unavailable"] =
+      (metrics.vendor_external_api_errors_total["service_unavailable"] || 0) + 1;
+
+    return sendError(res, req, 503, "service_unavailable", "Service temporarily overloaded");
+  }
+
+  if (q.includes("timeout")) {
+    metrics.vendor_external_api_errors_total["llm_timeout"] =
+      (metrics.vendor_external_api_errors_total["llm_timeout"] || 0) + 1;
+
+    return sendError(res, req, 504, "timeout", "Request timed out");
   }
 
   const lowerQuestion = question.toLowerCase();
@@ -578,6 +638,14 @@ app.post("/v1/ingest", upload.single("file"), (req, res) => {
 
   existingNamespaces.add(body.namespace_id);
 
+  if (body.source_id === "timeout_test") {
+    return sendError(res, req, 504, "timeout", "Ingest processing timeout");
+  }
+
+  if (body.source_id === "upstream_test") {
+    return sendError(res, req, 502, "upstream_error", "Failed to fetch external source");
+  }
+
   // simulate failure
   if (body.source_id === "fail_test") {
     const failedJob = {
@@ -632,11 +700,7 @@ app.post("/v1/ingest", upload.single("file"), (req, res) => {
 
   const content = "Articolul 15. — Aporturile în numerar sunt obligatorii.";
 
-  const chunkId = crypto
-    .createHash("sha256")
-    .update(content + body.source_id)
-    .digest("hex")
-    .slice(0, 32);
+  const chunkId = stableUuidFromContent(content, body.source_id);
 
   namespaceData.get(body.namespace_id).push({
     chunk_id: chunkId,  
@@ -879,7 +943,7 @@ app.get("/v1/health", (req, res) => {
 // Global error handler
 app.use((err, req, res, next) => {
   console.error(err);
-  const key = `llm_timeout`; // exemple
+  const key = `internal_error`;
 
   metrics.vendor_external_api_errors_total[key] =
     (metrics.vendor_external_api_errors_total[key] || 0) + 1;
