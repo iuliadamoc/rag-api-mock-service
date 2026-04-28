@@ -2,6 +2,7 @@ const express = require("express");
 const { v4: uuidv4 } = require("uuid");
 const { z } = require("zod");
 const crypto = require("crypto");
+const path = require("path");
 
 const app = express();
 app.use(express.json());
@@ -845,7 +846,9 @@ app.get("/v1/namespaces/:namespace_id/stats", (req, res) => {
 
 app.get("/v1/openapi.json", (req, res) => {
   try {
-    const spec = fs.readFileSync("./openapi.json", "utf-8");
+    const filePath = path.join(__dirname, "openapi.json");
+    const spec = fs.readFileSync(filePath, "utf-8");
+
     res.set("Content-Type", "application/json");
     res.send(spec);
   } catch (err) {
