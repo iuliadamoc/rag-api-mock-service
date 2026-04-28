@@ -577,6 +577,33 @@ app.post("/v1/ingest", upload.single("file"), (req, res) => {
 
   existingNamespaces.add(body.namespace_id);
 
+  // simulate failure
+  if (body.source_id === "fail_test") {
+    const failedJob = {
+      job_id: "j_" + uuidv4(),
+      status: "failed",
+
+      namespace_id: body.namespace_id,
+      source_id: body.source_id,
+
+      submitted_at: new Date().toISOString(),
+      completed_at: new Date().toISOString(),
+
+      error: {
+        code: "fetch_failed",
+        message: "Failed to fetch document",
+        retryable: false
+      }
+    };
+
+    jobsByKey.set(key, {
+      job: failedJob,
+      body
+    });
+
+    return res.status(202).json(failedJob);
+  }
+
   // CREATE NEW JOB
   const job = {
     job_id: "j_" + uuidv4(),
@@ -586,7 +613,9 @@ app.post("/v1/ingest", upload.single("file"), (req, res) => {
     source_id: body.source_id,
 
     submitted_at: new Date().toISOString(),
-    estimated_completion_at: new Date(Date.now() + 5 * 60 * 1000).toISOString()
+    estimated_completion_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+
+    error: null
   };
 
   // SAVE job + body
@@ -674,14 +703,17 @@ app.get("/v1/ingest/:job_id", (req, res) => {
     namespace_id: job.namespace_id,
     source_id: job.source_id,
     status: job.status,
+
     progress: {
       stage: progress.stage,
       percent: progress.percent,
       chunks_created: progress.percent > 50 ? 10 : 0
     },
+
     submitted_at: job.submitted_at,
     completed_at: job.completed_at || null,
-    error: null
+
+    error: job.error || null 
   });
 });
 
