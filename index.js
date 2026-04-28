@@ -7,6 +7,9 @@ const app = express();
 app.use(express.json());
 const fs = require("fs");
 
+const multer = require("multer");
+const upload = multer({ limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB
+
 // In-memory storage
 const jobsByKey = new Map();
 const rateLimitStore = new Map();
@@ -74,10 +77,12 @@ app.use((req, res, next) => {
 });
 
 app.use((req, res, next) => {
-  const key = `${req.method}_${req.path}`;
+  res.on("finish", () => {
+    const key = `${req.method}_${req.path}_${res.statusCode}`;
 
-  metrics.http_requests_total[key] =
-    (metrics.http_requests_total[key] || 0) + 1;
+    metrics.http_requests_total[key] =
+      (metrics.http_requests_total[key] || 0) + 1;
+  });
 
   next();
 });
@@ -460,9 +465,24 @@ app.post("/v1/eval", (req, res) => {
 });
 
 // INGEST
-app.post("/v1/ingest", (req, res) => {
+app.post("/v1/ingest", upload.single("file"), (req, res) => {
   const key = req.headers["idempotency-key"];
-  const body = req.body;
+  let body = req.body;
+
+  // if multipart, payload vine ca string
+  if (req.file) {
+    try {
+      body = JSON.parse(req.body.payload);
+    } catch (err) {
+      return res.status(400).json({
+        error: {
+          code: "invalid_request",
+          message: "Invalid JSON in payload",
+          request_id: req.requestId
+        }
+      });
+    }
+  }
 
   if (!body.namespace_id || !body.source_id) {
     return res.status(400).json({
@@ -485,7 +505,27 @@ app.post("/v1/ingest", (req, res) => {
     });
   }
 
-  // validate mime_type (optional)
+  if (body.source_type === "file" && !req.file) {
+    return res.status(400).json({
+      error: {
+        code: "invalid_request",
+        message: "File is required for source_type=file",
+        request_id: req.requestId
+      }
+    });
+  }
+
+  if (body.source_type === "url" && !body.url) {
+    return res.status(400).json({
+      error: {
+        code: "invalid_request",
+        message: "URL is required for source_type=url",
+        request_id: req.requestId
+      }
+    });
+  }
+
+  // validate mime_type 
   const allowedMime = [
     "text/html",
     "application/pdf",
@@ -493,7 +533,10 @@ app.post("/v1/ingest", (req, res) => {
     "text/markdown"
   ];
 
-  if (body.mime_type_hint && !allowedMime.includes(body.mime_type_hint)) {
+  // use real mime if file exists
+  const mime = req.file ? req.file.mimetype : body.mime_type_hint;
+
+  if (mime && !allowedMime.includes(mime)) {
     return res.status(415).json({
       error: {
         code: "unsupported_media_type",
@@ -513,8 +556,6 @@ app.post("/v1/ingest", (req, res) => {
     });
   }
 
-  existingNamespaces.add(body.namespace_id);
-
   // CHECK EXISTING
   if (jobsByKey.has(key)) {
     const existing = jobsByKey.get(key);
@@ -533,6 +574,8 @@ app.post("/v1/ingest", (req, res) => {
       }
     });
   }
+
+  existingNamespaces.add(body.namespace_id);
 
   // CREATE NEW JOB
   const job = {
@@ -612,6 +655,7 @@ app.get("/v1/ingest/:job_id", (req, res) => {
   const stageMap = {
     queued: { stage: "queued", percent: 10 },
     fetching: { stage: "fetching", percent: 30 },
+    extracting: { stage: "extracting", percent: 40 },
     chunking: { stage: "chunking", percent: 50 },
     embedding: { stage: "embedding", percent: 70 },
     indexing: { stage: "indexing", percent: 90 },
@@ -806,19 +850,26 @@ app.use((err, req, res, next) => {
 app.get("/metrics", (req, res) => {
   let output = "";
 
+  // HTTP request count (method + endpoint + status)
   for (const key in metrics.http_requests_total) {
-    output += `http_requests_total{endpoint="${key}"} ${metrics.http_requests_total[key]}\n`;
+    const [method, endpoint, status] = key.split("_");
+
+    output += `http_requests_total{method="${method}",endpoint="${endpoint}",status="${status}"} ${metrics.http_requests_total[key]}\n`;
   }
 
+  // Request durations
   metrics.http_request_duration.forEach(d => {
     output += `http_request_duration_seconds ${d}\n`;
   });
 
+  // Tokens
   output += `vendor_tokens_total{direction="input"} ${metrics.vendor_tokens_input}\n`;
   output += `vendor_tokens_total{direction="output"} ${metrics.vendor_tokens_output}\n`;
 
+  // Cost
   output += `vendor_cost_usd_total ${metrics.vendor_cost_usd_total}\n`;
 
+  // External API errors
   output += `vendor_external_api_errors_total ${metrics.vendor_external_api_errors_total}\n`;
 
   res.set("Content-Type", "text/plain");
