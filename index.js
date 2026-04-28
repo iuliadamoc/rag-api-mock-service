@@ -107,7 +107,7 @@ app.use((req, res, next) => {
 
   record.count += 1;
 
-  const remaining = Math.max(LIMIT - record.count, 0);
+  const remaining = Math.max(LIMIT - record.count + 1, 0);
   const resetSeconds = Math.ceil((record.resetTime - now) / 1000);
 
   // SET HEADERS (IMPORTANT)
@@ -463,6 +463,45 @@ app.post("/v1/ingest", (req, res) => {
   const key = req.headers["idempotency-key"];
   const body = req.body;
 
+  if (!body.namespace_id || !body.source_id) {
+    return res.status(400).json({
+      error: {
+        code: "invalid_request",
+        message: "Missing namespace_id or source_id",
+        request_id: req.requestId
+      }
+    });
+  }
+
+  // validate source_type
+  if (!["url", "file"].includes(body.source_type)) {
+    return res.status(422).json({
+      error: {
+        code: "validation_error",
+        message: "Invalid source_type",
+        request_id: req.requestId
+      }
+    });
+  }
+
+  // validate mime_type (optional)
+  const allowedMime = [
+    "text/html",
+    "application/pdf",
+    "text/plain",
+    "text/markdown"
+  ];
+
+  if (body.mime_type_hint && !allowedMime.includes(body.mime_type_hint)) {
+    return res.status(415).json({
+      error: {
+        code: "unsupported_media_type",
+        message: "Unsupported mime type",
+        request_id: req.requestId
+      }
+    });
+  }
+
   if (!key) {
     return res.status(400).json({
       error: {
@@ -707,9 +746,19 @@ app.get("/v1/namespaces/:namespace_id/stats", (req, res) => {
 });
 
 app.get("/v1/openapi.json", (req, res) => {
-  const spec = fs.readFileSync("./openapi.json", "utf-8");
-  res.set("Content-Type", "application/json");
-  res.send(spec);
+  try {
+    const spec = fs.readFileSync("./openapi.json", "utf-8");
+    res.set("Content-Type", "application/json");
+    res.send(spec);
+  } catch (err) {
+    return res.status(500).json({
+      error: {
+        code: "internal_error",
+        message: "OpenAPI spec not found",
+        request_id: req.requestId
+      }
+    });
+  }
 });
 
 // HEALTH
